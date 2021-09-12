@@ -72,10 +72,22 @@ pub fn invert_bwt(bwt: &BWTSlice) -> Vec<u8> {
     inverse
 }
 
+const ALPHA: [u8; 6] = [b'$', b'A', b'C', b'G', b'N', b'T'];
+const MAP: [u8; 128] = {
+    let mut m = [0u8; 128];
+    m[b'$' as usize] = 0;
+    m[b'A' as usize] = 1;
+    m[b'C' as usize] = 2;
+    m[b'G' as usize] = 3;
+    m[b'N' as usize] = 4;
+    m[b'T' as usize] = 5;
+    m
+};
+
 /// An occurrence array implementation.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Occ {
-    occ: Vec<Vec<usize>>,
+    occ: Vec<usize>,
     k: u32,
 }
 
@@ -91,33 +103,17 @@ impl Occ {
     ///
     /// * `bwt` - the BWT
     /// * `k` - the sampling rate: every k-th entry will be stored
-    pub fn new(bwt: &BWTSlice, k: u32, alphabet: &Alphabet) -> Self {
+    pub fn new(bwt: &BWTSlice, k: u32) -> Self {
         let n = bwt.len();
-        let m = alphabet
-            .max_symbol()
-            .expect("Expecting non-empty alphabet.") as usize
-            + 1;
-        let mut alpha = alphabet.symbols.iter().collect::<Vec<usize>>();
-        // include sentinel '$'
-        if (b'$' as usize) < m && !alphabet.is_word(b"$") {
-            alpha.push(b'$' as usize);
-        }
-        let mut occ: Vec<Vec<usize>> = vec![Vec::new(); m];
-        let mut curr_occ = vec![0usize; m];
-
-        // characters not in the alphabet won't take up much space
-        for &a in &alpha {
-            occ[a].reserve(n / k as usize);
-        }
+        let mut occ = Vec::with_capacity(n * ALPHA.len());
+        let mut curr_occ = vec![0usize; ALPHA.len()];
 
         for (i, &c) in bwt.iter().enumerate() {
-            curr_occ[c as usize] += 1;
+            let c_map = MAP[c as usize];
+            curr_occ[c_map as usize] += 1;
 
             if i % k as usize == 0 {
-                // only visit characters in the alphabet
-                for &a in &alpha {
-                    occ[a].push(curr_occ[a]);
-                }
+                occ.extend_from_slice(&curr_occ);
             }
         }
 
@@ -151,17 +147,18 @@ impl Occ {
         //
         // https://github.com/rust-bio/rust-bio/pull/74
         // https://github.com/rust-bio/rust-bio/pull/76
+        let a_map = MAP[a as usize];
 
         // self.k is our sampling rate, so find the checkpoints either side of r.
         let lo_checkpoint = r / self.k as usize;
         // Get the occurences at the low checkpoint
-        let lo_occ = self.occ[a as usize][lo_checkpoint];
+        let lo_occ = self.occ[(a_map as usize) + lo_checkpoint * ALPHA.len()];
 
         // If the sampling rate is infrequent it is worth checking if there is a closer
         // hi checkpoint.
         if self.k > 64 {
             let hi_checkpoint = lo_checkpoint + 1;
-            if let Some(&hi_occ) = self.occ[a as usize].get(hi_checkpoint) {
+            if let Some(&hi_occ) = self.occ.get((a_map as usize) + hi_checkpoint * ALPHA.len()) {
                 // Its possible that there are no occurences between the low and high
                 // checkpoint in which case we bail early.
                 if lo_occ == hi_occ {
