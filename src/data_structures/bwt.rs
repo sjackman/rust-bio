@@ -117,7 +117,11 @@ impl Occ {
             }
         }
 
-        Occ { occ, k }
+        assert_eq!(k.count_ones(), 1);
+        Occ {
+            occ,
+            k: k.trailing_zeros(),
+        }
     }
 
     /// Get occurrence count of symbol a in BWT[..r+1].
@@ -147,36 +151,49 @@ impl Occ {
         //
         // https://github.com/rust-bio/rust-bio/pull/74
         // https://github.com/rust-bio/rust-bio/pull/76
-        let a_map = MAP[a as usize];
+        unsafe {
+            let a_map = *MAP.as_ptr().add(a as usize);
 
-        // self.k is our sampling rate, so find the checkpoints either side of r.
-        let lo_checkpoint = r / self.k as usize;
-        // Get the occurences at the low checkpoint
-        let lo_occ = self.occ[(a_map as usize) + lo_checkpoint * ALPHA.len()];
+            // self.k is our sampling rate, so find the checkpoints either side of r.
+            let lo_checkpoint = r >> (self.k as usize);
+            // Get the occurences at the low checkpoint
+            let lo_occ = *self
+                .occ
+                .as_ptr()
+                .add((a_map as usize) + lo_checkpoint * ALPHA.len());
 
-        // If the sampling rate is infrequent it is worth checking if there is a closer
-        // hi checkpoint.
-        if self.k > 64 {
-            let hi_checkpoint = lo_checkpoint + 1;
-            if let Some(&hi_occ) = self.occ.get((a_map as usize) + hi_checkpoint * ALPHA.len()) {
-                // Its possible that there are no occurences between the low and high
-                // checkpoint in which case we bail early.
-                if lo_occ == hi_occ {
-                    return lo_occ;
-                }
+            // If the sampling rate is infrequent it is worth checking if there is a closer
+            // hi checkpoint.
+            if self.k > 6 {
+                // 64
+                let hi_checkpoint = lo_checkpoint + 1;
+                if let Some(&hi_occ) = self.occ.get((a_map as usize) + hi_checkpoint * ALPHA.len())
+                {
+                    // Its possible that there are no occurences between the low and high
+                    // checkpoint in which case we bail early.
+                    if lo_occ == hi_occ {
+                        return lo_occ;
+                    }
 
-                // If r is closer to the high checkpoint, count backwards from there.
-                let hi_idx = hi_checkpoint * self.k as usize;
-                if (hi_idx - r) < (self.k as usize / 2) {
-                    return hi_occ - bytecount::count(&bwt[r + 1..=hi_idx], a) as usize;
+                    // If r is closer to the high checkpoint, count backwards from there.
+                    let hi_idx = hi_checkpoint << (self.k as usize);
+                    if (hi_idx - r) < ((self.k as usize) >> 1) {
+                        return hi_occ
+                            - bytecount::count(slice_unchecked(bwt, r + 1, hi_idx + 1), a)
+                                as usize;
+                    }
                 }
             }
-        }
 
-        // Otherwise the default case is to count from the low checkpoint.
-        let lo_idx = lo_checkpoint * self.k as usize;
-        bytecount::count(&bwt[lo_idx + 1..=r], a) as usize + lo_occ
+            // Otherwise the default case is to count from the low checkpoint.
+            let lo_idx = lo_checkpoint << (self.k as usize);
+            bytecount::count(slice_unchecked(bwt, lo_idx + 1, r + 1), a) as usize + lo_occ
+        }
     }
+}
+
+unsafe fn slice_unchecked<'a>(bwt: &'a [u8], start: usize, end: usize) -> &'a [u8] {
+    std::slice::from_raw_parts(bwt.as_ptr().add(start), end - start)
 }
 
 /// Calculate the less array for a given BWT. Complexity O(n).
