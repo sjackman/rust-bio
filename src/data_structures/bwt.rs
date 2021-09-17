@@ -39,7 +39,7 @@ pub type BWTFind = Vec<usize>;
 pub fn bwt(text: &[u8], pos: RawSuffixArraySlice) -> BWT {
     assert_eq!(text.len(), pos.len());
     let n = text.len();
-    let mut bwt: BWT = vec![0u8; (n + 32) / 32 * 32];
+    let mut bwt: BWT = vec![0u8; (n + 31) / 32 * 32];
     unsafe {
         bwt.set_len(n);
     }
@@ -201,6 +201,8 @@ static MASK: [u8; 64] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
 
+static L: usize = 32;
+
 #[target_feature(enable = "avx2")]
 unsafe fn count_bytes(ptr: *const u8, lo: usize, hi: usize, c: u8) -> usize {
     #[cfg(target_arch = "x86")]
@@ -211,21 +213,24 @@ unsafe fn count_bytes(ptr: *const u8, lo: usize, hi: usize, c: u8) -> usize {
     let mut acc = _mm256_setzero_si256();
     let cv = _mm256_set1_epi8(c as i8);
     let mut i = lo;
-    while i < hi {
+
+    while i + L <= hi {
         acc = _mm256_sub_epi8(
             acc,
             _mm256_cmpeq_epi8(_mm256_loadu_si256(ptr.add(i) as _), cv),
         );
-        i += 32;
+        i += L;
     }
 
-    let rem = (hi - lo) % 32;
+    let rem = (hi - lo) % L;
 
     if rem != 0 {
         let v = _mm256_loadu_si256(ptr.add(i) as _);
-        let mask = _mm256_loadu_si256(MASK.as_ptr().add(32 - rem) as _);
+        let mask = _mm256_loadu_si256(MASK.as_ptr().add(L - rem) as _);
         acc = _mm256_sub_epi8(acc, _mm256_and_si256(mask, _mm256_cmpeq_epi8(v, cv)));
     }
+
+    acc = _mm256_sad_epu8(acc, _mm256_setzero_si256());
 
     #[repr(align(32))]
     struct A([u64; 4]);
