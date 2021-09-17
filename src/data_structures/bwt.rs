@@ -187,7 +187,7 @@ impl Occ {
 
             // Otherwise the default case is to count from the low checkpoint.
             let lo_idx = lo_checkpoint << (self.k as usize);
-            bytecount::count(slice_unchecked(bwt, lo_idx + 1, r + 1), a) as usize + lo_occ
+            bytecount::naive_count_32(slice_unchecked(bwt, lo_idx + 1, r + 1), a) as usize + lo_occ
         }
     }
 }
