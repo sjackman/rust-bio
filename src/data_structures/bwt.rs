@@ -162,7 +162,7 @@ impl Occ {
                 .as_ptr()
                 .add((a_map as usize) + lo_checkpoint * ALPHA.len());
 
-            // If the sampling rate is infrequent it is worth checking if there is a closer
+            /*// If the sampling rate is infrequent it is worth checking if there is a closer
             // hi checkpoint.
             if self.k > 6 {
                 // 64
@@ -183,7 +183,7 @@ impl Occ {
                                 as usize;
                     }
                 }
-            }
+            }*/
 
             // Otherwise the default case is to count from the low checkpoint.
             let lo_idx = lo_checkpoint << (self.k as usize);
