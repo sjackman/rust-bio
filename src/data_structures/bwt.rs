@@ -193,6 +193,18 @@ impl Occ {
             count_bytes(bwt.as_ptr(), lo_idx + 1, r + 1, a) + lo_occ
         }
     }
+
+    // Prefetch into cache.
+    #[cfg(target_arch = "x86_64")]
+    pub fn prefetch(&self, i: usize) {
+        use std::arch::x86_64;
+
+        let lo_checkpoint = i >> (self.k as usize);
+        unsafe {
+            let lo_occ = self.occ.as_ptr().add(lo_checkpoint * ALPHA.len());
+            x86_64::_mm_prefetch::<{ x86_64::_MM_HINT_T1 }>(lo_occ as *const i8);
+        }
+    }
 }
 
 static MASK: [u8; 64] = [

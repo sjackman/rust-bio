@@ -54,6 +54,7 @@
 //! }
 //! ```
 
+use core::arch::x86_64;
 use std::borrow::Borrow;
 use std::iter::DoubleEndedIterator;
 
@@ -470,6 +471,27 @@ impl<DBWT: Borrow<BWT>, DLess: Borrow<Less>, DOcc: Borrow<Occ>> FMDIndex<DBWT, D
         }
     }
 
+    /// Prefetch BWT and Occ into cache.
+    #[cfg(target_arch = "x86_64")]
+    pub fn prefetch(&self, i: usize) {
+        unsafe {
+            x86_64::_mm_prefetch::<{ x86_64::_MM_HINT_T1 }>(
+                self.fmindex.bwt.borrow().as_ptr().add(i) as *const i8,
+            );
+        }
+        self.fmindex.occ.borrow().prefetch(i);
+    }
+
+    /// Prefetch BWT and Occ into cache.
+    #[cfg(target_arch = "x86_64")]
+    pub fn prefetch_interval(&self, interval: &BiInterval) {
+        // Prefetch BWT and Occ into cache.
+        self.prefetch(interval.lower);
+        self.prefetch(interval.lower + interval.size);
+        self.prefetch(interval.lower_rev);
+        self.prefetch(interval.lower_rev + interval.size);
+    }
+
     /// Backward extension of given interval with given character.
     pub fn backward_ext(&self, interval: &BiInterval, a: u8) -> BiInterval {
         let mut s = 0;
@@ -496,12 +518,14 @@ impl<DBWT: Borrow<BWT>, DLess: Borrow<Less>, DOcc: Borrow<Occ>> FMDIndex<DBWT, D
         // calculate lower bound
         let k = self.fmindex.less(a) + o;
 
-        BiInterval {
+        let new_interval = BiInterval {
             lower: k,
             lower_rev: l,
             size: s,
             match_size: interval.match_size + 1,
-        }
+        };
+        self.prefetch_interval(&new_interval);
+        new_interval
     }
 
     pub fn forward_ext(&self, interval: &BiInterval, a: u8) -> BiInterval {
