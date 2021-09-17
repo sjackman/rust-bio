@@ -400,6 +400,8 @@ impl<DBWT: Borrow<BWT>, DLess: Borrow<Less>, DOcc: Borrow<Occ>> FMDIndex<DBWT, D
     /// }
     /// ```
     pub fn all_smems(&self, pattern: &[u8], l: usize) -> Vec<(BiInterval, usize, usize)> {
+        self.smems(pattern, 0, l)
+        /*
         let mut smems = Vec::new();
         let mut i0 = 0;
         while i0 < pattern.len() {
@@ -415,7 +417,7 @@ impl<DBWT: Borrow<BWT>, DLess: Borrow<Less>, DOcc: Borrow<Occ>> FMDIndex<DBWT, D
             i0 = next_i0;
             smems.append(&mut curr_smems);
         }
-        smems
+        smems*/
     }
 
     /// Initialize interval with given start character.
