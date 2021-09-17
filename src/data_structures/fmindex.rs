@@ -289,7 +289,13 @@ impl<DBWT: Borrow<BWT>, DLess: Borrow<Less>, DOcc: Borrow<Occ>> FMDIndex<DBWT, D
     /// assert_eq!(pattern_position, 0);
     /// assert_eq!(smem_len, 3);
     /// ```
-    pub fn smems(&self, pattern: &[u8], i: usize, l: usize) -> Vec<(BiInterval, usize, usize)> {
+    pub fn smems(
+        &self,
+        pattern: &[u8],
+        i: usize,
+        l: usize,
+        skip_extend: bool,
+    ) -> Vec<(BiInterval, usize, usize)> {
         let curr = &mut Vec::new(); // pairs (biinterval, current match length)
         let prev = &mut Vec::new(); // """
         let mut matches = Vec::new(); // triples (biinterval, position on pattern, smem length)
@@ -305,7 +311,7 @@ impl<DBWT: Borrow<BWT>, DLess: Borrow<Less>, DOcc: Borrow<Occ>> FMDIndex<DBWT, D
             let forward_interval = self.forward_ext(&interval, a);
 
             // if size changed, add last interval to list
-            if interval.size != forward_interval.size {
+            if !skip_extend && interval.size != forward_interval.size {
                 curr.push((interval, match_len));
             }
             // if new interval size is zero, stop, as no further forward extension is possible
@@ -399,25 +405,46 @@ impl<DBWT: Borrow<BWT>, DLess: Borrow<Less>, DOcc: Borrow<Occ>> FMDIndex<DBWT, D
     ///     );
     /// }
     /// ```
-    pub fn all_smems(&self, pattern: &[u8], l: usize) -> Vec<(BiInterval, usize, usize)> {
-        self.smems(pattern, 0, l)
-        /*
-        let mut smems = Vec::new();
-        let mut i0 = 0;
-        while i0 < pattern.len() {
-            let mut curr_smems = self.smems(pattern, i0, l);
-            let mut next_i0 = i0 + 1; // this always works since:
-                                      // if we have a SMEM overlapping i0, it is at least 1bp long.
-                                      // If we don't have a smem, then we'll reiterate from i0+1
-            for (_, p, l) in curr_smems.iter() {
-                if p + l > next_i0 {
-                    next_i0 = p + l;
-                }
+    pub fn all_smems(
+        &self,
+        pattern: &[u8],
+        l: usize,
+        only_three: bool,
+        mmp_like: bool,
+    ) -> Vec<(BiInterval, usize, usize)> {
+        if only_three {
+            let mut smems = self.smems(pattern, 0, l, mmp_like);
+            let mut end_idx = smems.iter().fold(0usize, |x, (_, _, l)| x.max(*l));
+
+            if end_idx <= pattern.len() / 2 {
+                let curr_smems = self.smems(pattern, pattern.len() / 2, l, mmp_like);
+                end_idx = end_idx.max(curr_smems.iter().fold(0usize, |x, (_, p, l)| x.max(p + l)));
+                smems.extend(curr_smems);
             }
-            i0 = next_i0;
-            smems.append(&mut curr_smems);
+
+            if end_idx <= pattern.len() - 1 {
+                smems.extend(self.smems(pattern, pattern.len() - 1, l, mmp_like));
+            }
+
+            smems
+        } else {
+            let mut smems = Vec::new();
+            let mut i0 = 0;
+            while i0 < pattern.len() {
+                let mut curr_smems = self.smems(pattern, i0, l, mmp_like);
+                let mut next_i0 = i0 + 1; // this always works since:
+                                          // if we have a SMEM overlapping i0, it is at least 1bp long.
+                                          // If we don't have a smem, then we'll reiterate from i0+1
+                for (_, p, l) in curr_smems.iter() {
+                    if p + l > next_i0 {
+                        next_i0 = p + l;
+                    }
+                }
+                i0 = next_i0;
+                smems.append(&mut curr_smems);
+            }
+            smems
         }
-        smems*/
     }
 
     /// Initialize interval with given start character.
@@ -453,7 +480,7 @@ impl<DBWT: Borrow<BWT>, DLess: Borrow<Less>, DOcc: Borrow<Occ>> FMDIndex<DBWT, D
         // then c(T) = A, c(G) = C, c(C) = G, N, c(A) = T, ...
         // Hence, we calculate lower revcomp bounds by iterating over
         // symbols and updating from previous one.
-        for &b in b"$TGCNAtgcna".iter() {
+        for &b in b"$TGCNA".iter() {
             l += s;
             o = if interval.lower == 0 {
                 0

@@ -39,7 +39,10 @@ pub type BWTFind = Vec<usize>;
 pub fn bwt(text: &[u8], pos: RawSuffixArraySlice) -> BWT {
     assert_eq!(text.len(), pos.len());
     let n = text.len();
-    let mut bwt: BWT = repeat(0).take(n).collect();
+    let mut bwt: BWT = vec![0u8; (n + 32) / 32 * 32];
+    unsafe {
+        bwt.set_len(n);
+    }
     for r in 0..n {
         let p = pos[r];
         bwt[r] = if p > 0 { text[p - 1] } else { text[n - 1] };
@@ -187,13 +190,48 @@ impl Occ {
 
             // Otherwise the default case is to count from the low checkpoint.
             let lo_idx = lo_checkpoint << (self.k as usize);
-            bytecount::count(slice_unchecked(bwt, lo_idx + 1, r + 1), a) as usize + lo_occ
+            count_bytes(bwt.as_ptr(), lo_idx + 1, r + 1, a) + lo_occ
         }
     }
 }
 
-unsafe fn slice_unchecked<'a>(bwt: &'a [u8], start: usize, end: usize) -> &'a [u8] {
-    std::slice::from_raw_parts(bwt.as_ptr().add(start), end - start)
+static MASK: [u8; 64] = [
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+];
+
+#[target_feature(enable = "avx2")]
+unsafe fn count_bytes(ptr: *const u8, lo: usize, hi: usize, c: u8) -> usize {
+    #[cfg(target_arch = "x86")]
+    use std::arch::x86::*;
+    #[cfg(target_arch = "x86_64")]
+    use std::arch::x86_64::*;
+
+    let mut acc = _mm256_setzero_si256();
+    let cv = _mm256_set1_epi8(c as i8);
+    let mut i = lo;
+    while i < hi {
+        acc = _mm256_sub_epi8(
+            acc,
+            _mm256_cmpeq_epi8(_mm256_loadu_si256(ptr.add(i) as _), cv),
+        );
+        i += 32;
+    }
+
+    let rem = (hi - lo) % 32;
+
+    if rem != 0 {
+        let v = _mm256_loadu_si256(ptr.add(i) as _);
+        let mask = _mm256_loadu_si256(MASK.as_ptr().add(32 - rem) as _);
+        acc = _mm256_sub_epi8(acc, _mm256_and_si256(mask, _mm256_cmpeq_epi8(v, cv)));
+    }
+
+    #[repr(align(32))]
+    struct A([u64; 4]);
+    let mut a = A([0; 4]);
+    _mm256_store_si256(a.0.as_mut_ptr() as _, acc);
+    (a.0[0] + a.0[1] + a.0[2] + a.0[3]) as usize
 }
 
 /// Calculate the less array for a given BWT. Complexity O(n).
